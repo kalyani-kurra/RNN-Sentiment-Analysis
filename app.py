@@ -1,21 +1,46 @@
-from flask import Flask, render_template, request
+import streamlit as st
 import tensorflow as tf
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 import pickle
 import re
 
-app = Flask(__name__)
+# ---------------------------------------
+# Page configuration
+# ---------------------------------------
+st.set_page_config(
+    page_title="RNN Sentiment Analysis",
+    page_icon="💬",
+    layout="centered"
+)
+
+st.title("💬 RNN Sentiment Analysis")
+st.write("Enter a review to predict whether the sentiment is Positive or Negative.")
 
 # ---------------------------------------
 # Load trained RNN model
 # ---------------------------------------
-model = tf.keras.models.load_model("sentiment_rnn.h5")
+@st.cache_resource
+def load_model():
+    return tf.keras.models.load_model("sentiment_rnn.h5")
+
 
 # ---------------------------------------
 # Load tokenizer
 # ---------------------------------------
-with open("tokenizer.pkl", "rb") as file:
-    tokenizer = pickle.load(file)
+@st.cache_resource
+def load_tokenizer():
+    with open("tokenizer.pkl", "rb") as file:
+        return pickle.load(file)
+
+
+try:
+    model = load_model()
+    tokenizer = load_tokenizer()
+except Exception as e:
+    st.error("Error loading the model or tokenizer.")
+    st.code(str(e))
+    st.stop()
+
 
 MAX_LENGTH = 200
 
@@ -24,10 +49,27 @@ MAX_LENGTH = 200
 # Text cleaning
 # ---------------------------------------
 def clean_text(text):
+
     text = text.lower()
-    text = re.sub(r"<br\s*/?>", " ", text)
-    text = re.sub(r"[^a-zA-Z\s]", " ", text)
-    text = re.sub(r"\s+", " ", text)
+
+    text = re.sub(
+        r"<br\s*/?>",
+        " ",
+        text
+    )
+
+    text = re.sub(
+        r"[^a-zA-Z\s]",
+        " ",
+        text
+    )
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    )
+
     return text.strip()
 
 
@@ -36,11 +78,9 @@ def clean_text(text):
 # ---------------------------------------
 def predict_sentiment(review):
 
-    original_review = review
-
     review = clean_text(review)
 
-    # Convert text to sequence
+    # Convert text into sequence
     sequence = tokenizer.texts_to_sequences([review])
 
     # Padding
@@ -53,7 +93,10 @@ def predict_sentiment(review):
 
     # RNN prediction
     prediction = float(
-        model.predict(padded, verbose=0)[0][0]
+        model.predict(
+            padded,
+            verbose=0
+        )[0][0]
     )
 
     # ---------------------------------------
@@ -97,11 +140,13 @@ def predict_sentiment(review):
     words = review.split()
 
     negative_count = sum(
-        word in negative_words for word in words
+        word in negative_words
+        for word in words
     )
 
     positive_count = sum(
-        word in positive_words for word in words
+        word in positive_words
+        for word in words
     )
 
     # ---------------------------------------
@@ -142,67 +187,69 @@ def predict_sentiment(review):
 
 
 # ---------------------------------------
-# Home page
+# User input
 # ---------------------------------------
-@app.route("/", methods=["GET", "POST"])
-def home():
 
-    sentiment = None
-    confidence = None
-    review = ""
+review = st.text_area(
+    "Enter your review:",
+    placeholder="Example: This movie was amazing and I really enjoyed it.",
+    height=150
+)
 
-    if request.method == "POST":
 
-        review = request.form.get(
-            "review",
-            ""
-        ).strip()
+# ---------------------------------------
+# Predict button
+# ---------------------------------------
 
-        if review:
+if st.button(
+    "🔍 Predict Sentiment",
+    use_container_width=True
+):
 
-            sentiment, confidence = predict_sentiment(
-                review
+    if not review.strip():
+
+        st.warning("Please enter a review.")
+
+    else:
+
+        sentiment, confidence = predict_sentiment(
+            review
+        )
+
+        st.write("### Result")
+
+        if sentiment == "Positive":
+
+            st.success(
+                f"😊 Positive Sentiment\n\n"
+                f"Confidence: {confidence:.2f}%"
             )
 
-    return render_template(
-        "index.html",
-        sentiment=sentiment,
-        confidence=confidence,
-        review=review
+        else:
+
+            st.error(
+                f"😞 Negative Sentiment\n\n"
+                f"Confidence: {confidence:.2f}%"
+            )
+
+
+# ---------------------------------------
+# Project information
+# ---------------------------------------
+
+with st.expander("About this project"):
+
+    st.write(
+        """
+        This application uses a trained Recurrent Neural Network (RNN)
+        for sentiment analysis.
+
+        The entered review is cleaned, converted into a sequence using
+        the tokenizer, padded to a fixed length of 200, and passed to
+        the trained RNN model.
+
+        The model predicts whether the review has Positive or Negative
+        sentiment.
+        """
     )
-
-
-# ---------------------------------------
-# API endpoint
-# ---------------------------------------
-@app.route("/predict", methods=["POST"])
-def predict():
-
-    data = request.get_json()
-
-    if not data or "review" not in data:
-
-        return {
-            "error": "Please provide a review"
-        }, 400
-
-    review = data["review"]
-
-    sentiment, confidence = predict_sentiment(
-        review
-    )
-
-    return {
-        "review": review,
-        "sentiment": sentiment,
-        "confidence": round(confidence, 2)
-    }
-
-
-# ---------------------------------------
-# Run Flask
-# ---------------------------------------
-if __name__ == "__main__":
-
-    app.run(debug=True)
 
